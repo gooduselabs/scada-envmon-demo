@@ -1,0 +1,65 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Environmental Monitoring SCADA Demo — Wastewater, Stack & Air Quality | GoodUseLabs</title>
+<meta name="description" content="Live web demo of an automatic environmental monitoring SCADA: wastewater discharge (pH, COD, TSS, NH4+), stack emissions (dust, SO2, NOx, CO) and ambient air (PM2.5) stations with map, gauges, trends, exceedance alarms and auto-sampler. Simulated data.">
+<link rel="canonical" href="https://gooduselabs.github.io/scada-envmon-demo/">
+<link rel="stylesheet" href="core.css"><style>
+:root{--acc:#34d399;--acc2:#22d3ee}
+.gauges{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.g{text-align:center;border:1px solid var(--line);border-radius:12px;padding:8px 4px;background:rgba(255,255,255,.02)}.g svg{width:92px;height:92px}.g .n{font-size:11px;color:var(--mut)}.g .lim{font-size:10px;color:var(--mut)}
+.g.x{border-color:#7f1d1d;box-shadow:0 0 0 1px #7f1d1d inset,0 0 18px rgba(239,68,68,.25)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}.tabs .btn.on{border-color:var(--acc);color:var(--acc)}
+.st{cursor:pointer}.ring{animation:ring 2s infinite;transform-origin:center;transform-box:fill-box}@keyframes ring{from{transform:scale(.6);opacity:1}to{transform:scale(2.2);opacity:0}}
+</style></head><body>
+<header><div class="logo"><i></i><div>ENVIRO-WATCH · IP-SOUTH<small>Automatic environmental monitoring SCADA</small></div></div>
+<div class="hdr-r"><span class="badge p">Modbus RTU / 4-20 mA</span><span class="badge p">MQTT · TLS</span><span class="badge p">FTP push to authority</span><span class="badge"><b class="mono" id="clk"></b></span><span class="badge live">LIVE · SIMULATED</span></div></header>
+<main>
+<div class="card kpi"><h3>Stations online</h3><div><span class="v mono" id="kOn">3/3</span></div><div class="d">Data capture 24 h <span class="mono" id="kCap"></span>%</div></div>
+<div class="card kpi"><h3>Effluent flow</h3><div><span class="v mono" id="kQ"></span><span class="u">m³/h</span></div><div class="d">Today <span id="kQd" class="mono"></span> m³</div></div>
+<div class="card kpi"><h3>COD outlet</h3><div><span class="v mono" id="kCOD"></span><span class="u">mg/L</span></div><div class="d">Limit <span class="mono" id="kCODl"></span> mg/L</div></div>
+<div class="card kpi"><h3>Stack dust</h3><div><span class="v mono" id="kDust"></span><span class="u">mg/Nm³</span></div><div class="d">O₂ ref. corrected</div></div>
+<div class="card kpi"><h3>Ambient PM2.5</h3><div><span class="v mono" id="kPM"></span><span class="u">µg/m³</span></div><div class="d">AQI category <b id="kAQI"></b></div></div>
+<div class="card kpi"><h3>Last data push</h3><div><span class="v mono" id="kPush"></span></div><div class="d">Files sent today <span id="kFiles" class="mono"></span></div></div>
+<div class="card span6"><h3>Station map · industrial park <span class="badge">click a station</span></h3><svg class="diag" id="map" viewBox="0 0 600 380"></svg></div>
+<div class="card span6"><h3><span id="stName"></span><span class="tabs" id="tabs"></span></h3><div class="gauges" id="gauges"></div>
+<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="btnX">Simulate COD exceedance</button><span class="badge" id="samp">Auto-sampler: standby</span><span class="badge" id="valve">Discharge valve: OPEN</span></div></div>
+<div class="card span8"><h3>Trend · <span id="trName"></span> <span class="mono">dashed = limit</span></h3><canvas class="trend" id="tr"></canvas></div>
+<div class="card span4"><h3>Analyzer health</h3><div class="grid-dev" id="health"></div></div>
+<div class="card span12"><h3>Alarms & events</h3><div class="tw"><table><thead><tr><th>Time</th><th>Prio</th><th>Tag</th><th>Message</th></tr></thead><tbody id="al"></tbody></table></div></div>
+</main>
+<footer><span>Demo by <a href="https://gooduselabs.com">GoodUseLabs</a> — simulated values; limits are configurable examples, check the regulation that applies to your permit.</span><span><a href="https://gooduselabs.com/blog/he-thong-quan-trac-moi-truong-tu-dong">Read the engineering article →</a></span></footer>
+<script src="core.js"></script><script>
+const ST=[
+{id:'WW-01',n:'Wastewater discharge',x:430,y:250,c:'#22d3ee',p:[['pH','',7.2,6,9,1,0,14,'range'],['COD','mg/L',48,0,75,1,0,150],['TSS','mg/L',22,0,50,1,0,100],['NH₄⁺','mg/L',2.1,0,5,1,0,10],['Temp','°C',31,0,40,1,20,45],['Flow','m³/h',180,0,0,0,0,400]]},
+{id:'ST-01',n:'Boiler stack',x:220,y:120,c:'#fbbf24',p:[['Dust','mg/Nm³',62,0,200,1,0,300],['SO₂','mg/Nm³',210,0,500,1,0,800],['NOx','mg/Nm³',340,0,850,1,0,1200],['CO','mg/Nm³',180,0,1000,1,0,1500],['O₂','%',9.5,0,0,0,0,21],['Flow','kNm³/h',42,0,0,0,0,80]]},
+{id:'AQ-01',n:'Ambient air (fence line)',x:110,y:290,c:'#34d399',p:[['PM2.5','µg/m³',28,0,50,1,0,150],['PM10','µg/m³',55,0,100,1,0,300],['SO₂','µg/m³',40,0,125,1,0,350],['NO₂','µg/m³',35,0,100,1,0,300],['Temp','°C',30,0,0,0,15,45],['RH','%',72,0,0,0,0,100]]}];
+ST.forEach(s=>s.p.forEach(q=>q.v=q[2]));let sn=0,sel=0,xc=0,Qd=0,files=0,sim;const al=new Alarms($('#al'));const xflag={};
+let m=`<defs><pattern id="gr" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" fill="none" stroke="#132033"/></pattern><linearGradient id="riv" x1="0" x2="1"><stop offset="0" stop-color="#0e7490"/><stop offset="1" stop-color="#155e75"/></linearGradient></defs><rect width="600" height="380" fill="url(#gr)"/>`;
+m+=`<path d="M0 330 C120 300 200 360 330 320 S520 260 600 300 L600 380 L0 380Z" fill="url(#riv)" opacity=".7"/><text x="520" y="350" fill="#67e8f9" font-size="11">Receiving river</text>`;
+[[150,60,140,90,'Boiler house'],[320,70,170,110,'Production halls'],[360,200,110,70,'WWTP'],[60,190,120,70,'Warehouse']].forEach(([x,y,w,h,t])=>m+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="#0f1a2a" stroke="#22324a"/><text x="${x+8}" y="${y+16}" fill="#7f8ea3" font-size="10">${t}</text>`);
+m+=`<path class="flow" d="M430 270 C440 290 450 300 470 310" stroke="#22d3ee" stroke-width="3" fill="none"/><path d="M220 120 C230 80 250 60 290 40" stroke="#94a3b8" stroke-width="10" fill="none" opacity=".15" class="flow"/>`;
+ST.forEach((s,i)=>m+=`<g class="st" data-i="${i}"><circle class="ring" cx="${s.x}" cy="${s.y}" r="10" fill="none" stroke="${s.c}" stroke-width="2" id="rg${i}"/><circle cx="${s.x}" cy="${s.y}" r="8" fill="${s.c}" id="sd${i}"/><rect x="${s.x+14}" y="${s.y-26}" width="128" height="40" rx="6" fill="#070b12ee" stroke="${s.c}66"/><text x="${s.x+22}" y="${s.y-11}" fill="${s.c}" font-size="10" font-weight="700">${s.id}</text><text x="${s.x+22}" y="${s.y+4}" fill="#dce6f2" font-size="10" class="mono" id="ml${i}"></text></g>`);
+$('#map').innerHTML=m;document.querySelectorAll('.st').forEach(g=>g.onclick=()=>pick(+g.dataset.i));
+$('#tabs').innerHTML=ST.map((s,i)=>`<button class="btn" data-i="${i}">${s.id}</button>`).join('');document.querySelectorAll('#tabs .btn').forEach(b=>b.onclick=()=>pick(+b.dataset.i));
+let tr;function pick(i){sel=i;const s=ST[i];document.querySelectorAll('#tabs .btn').forEach((b,j)=>b.classList.toggle('on',j==i));$('#stName').textContent=s.id+' · '+s.n;
+$('#gauges').innerHTML=s.p.map((q,j)=>`<div class="g" id="g${j}"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="#1a2536" stroke-width="9" fill="none" stroke-dasharray="188 252" transform="rotate(135 50 50)"/><circle id="ga${j}" cx="50" cy="50" r="40" stroke="${s.c}" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="0 252" transform="rotate(135 50 50)" style="transition:stroke-dasharray .8s"/><text x="50" y="54" text-anchor="middle" fill="#dce6f2" font-size="17" font-weight="700" class="mono" id="gv${j}"></text><text x="50" y="70" text-anchor="middle" fill="#7f8ea3" font-size="9">${q[1]}</text></svg><div class="n">${q[0]}</div><div class="lim">${q[5]?(q[8]?'Limit '+q[3]+'–'+q[4]:'Limit ≤ '+q[4]):'info'}</div></div>`).join('');
+const k=s.p[i==0?1:0];$('#trName').textContent=s.id+' '+k[0]+' ('+k[1]+')';tr=new Trend($('#tr'),[{n:k[0],c:s.c,fill:1},{n:'Limit',c:'#ef4444'}],{max:150,ymin:0,ymax:k[4]*1.6});tr.hist=true;$('#btnX').style.display=i==0?'':'none';render()}
+function render(){const s=ST[sel];s.p.forEach((q,j)=>{const ex=q[5]&&(q.v>q[4]||(q[8]&&q.v<q[3]));const f=Math.max(0,Math.min(1,(q.v-q[6])/(q[7]-q[6])));
+const a=$('#ga'+j);if(!a)return;a.setAttribute('stroke-dasharray',(188*f).toFixed(1)+' 252');a.setAttribute('stroke',ex?'#ef4444':f>.8*(q[4]-q[6])/(q[7]-q[6])&&q[5]?'#f59e0b':s.c);$('#gv'+j).textContent=fmt(q.v,q.v<20?1:0);$('#g'+j).classList.toggle('x',!!ex)})}
+const H={};function step(){sim+=60000;const d=new Date(sim),hr=d.getHours()+d.getMinutes()/60;
+ST.forEach((s,i)=>{s.p.forEach((q,j)=>{let base=q[2];if(i==0&&j==1&&xc>0)base=q[2]*2.1;if(i==2&&j<2)base*=1+.4*Math.sin(Math.PI*(hr-5)/12)**2;q.v+=(noise(base,.12)-q.v)*.3;
+if(q[5]){const ex=q.v>q[4]||(q[8]&&q.v<q[3]);const key=s.id+q[0];if(ex&&!xflag[key]){al.add('H',s.id+'.'+q[0],`${q[0]} ${fmt(q.v,1)} ${q[1]} exceeds limit ${q[4]} ${q[1]}`);if(i==0&&j==1){$('#samp').textContent='Auto-sampler: SAMPLE TAKEN #'+(++sn);al.add('M','WW-01.SAMPLER','Auto-sampler triggered — sealed sample for lab verification')}}
+if(!ex&&xflag[key])al.add('L',s.id+'.'+q[0],q[0]+' back within limit');xflag[key]=ex}});
+$('#ml'+i).textContent=s.p.slice(0,2).map(q=>q[0]+' '+fmt(q.v,q.v<20?1:0)).join(' · ');const any=s.p.some(q=>q[5]&&(q.v>q[4]||(q[8]&&q.v<q[3])));$('#sd'+i).setAttribute('fill',any?'#ef4444':s.c);$('#rg'+i).setAttribute('stroke',any?'#ef4444':s.c)});
+if(xc>0)xc--;$('#valve').textContent='Discharge valve: '+(xc>0?'DIVERT → buffer tank':'OPEN');$('#valve').style.color=xc>0?'#fca5a5':'';
+const w=ST[0].p,a=ST[1].p,q=ST[2].p;Qd+=w[5].v/60;if(d.getMinutes()%5==0)files++;
+$('#kQ').textContent=fmt(w[5].v,0);$('#kQd').textContent=fmt(Qd,0);$('#kCOD').textContent=fmt(w[1].v,1);$('#kCODl').textContent=w[1][4];$('#kDust').textContent=fmt(a[0].v,1);$('#kPM').textContent=fmt(q[0].v,1);
+const pm=q[0].v;$('#kAQI').textContent=pm<25?'Good':pm<50?'Moderate':'Poor';$('#kAQI').style.color=pm<25?'#22c55e':pm<50?'#f59e0b':'#ef4444';
+$('#kPush').textContent=String(d.getHours()).padStart(2,'0')+':'+String(Math.floor(d.getMinutes()/5)*5).padStart(2,'0');$('#kFiles').textContent=files;$('#kCap').textContent=fmt(rnd(99.2,99.8),1);
+$('#clk').textContent=d.toLocaleTimeString('en-GB').slice(0,5)+' (sim ×60)';
+ST.forEach((s,i)=>{const k=s.p[i==0?1:0];(H[i]=H[i]||[]).push(k.v);if(H[i].length>150)H[i].shift()});
+const k=ST[sel].p[sel==0?1:0];tr.s[0].d=H[sel].slice();tr.s[1].d=H[sel].map(()=>k[4]);tr.draw();render();
+$('#health').innerHTML=[['COD analyzer','Cal OK · 3 d ago'],['pH probe','Slope 98 %'],['CEMS','Zero/span OK'],['Dust monitor','Purge air OK'],['PM sensor','Heater ON'],['Datalogger','UPS 100 %']].map(([a,b])=>`<div class=dev><b><span class=dot style="background:#22c55e"></span>${a}</b><span>${b}</span></div>`).join('')}
+$('#btnX').onclick=()=>{xc=25;al.add('M','OPERATOR','Test: COD shock load injected (simulation)')};
+sim=new Date().setHours(7,0,0,0);pick(0);for(let i=0;i<150;i++)step();
+al.add('L','DL01.FTP','Connected to authority receiving server · TXT files per station per cycle');setInterval(step,1000);
+</script></body></html>
